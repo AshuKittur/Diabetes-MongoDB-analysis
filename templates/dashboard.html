@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diabetes Patient Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            color: #7f8c8d;
+            margin-top: 10px;
+        }
+        .error-message {
+            background: #ff6b6b;
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s ease;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 10px 0;
+        }
+        .stat-label {
+            color: #7f8c8d;
+            font-size: 0.95em;
+            font-weight: 500;
+        }
+        .chart-container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .chart-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏥 Diabetes Patient Analysis Dashboard</h1>
+            <p class="subtitle">Analysis of patient records from 130 US hospitals</p>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading statistics...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Patient Readmission Distribution</div>
+            <canvas id="readmissionChart" width="400" height="200"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Average Metrics Overview</div>
+            <canvas id="metricsChart" width="400" height="200"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Initialize charts variables
+        let readmissionChartInstance = null;
+        let metricsChartInstance = null;
+
+        // Load data when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Dashboard loaded, fetching data...');
+            loadDashboardData();
+        });
+
+        async function loadDashboardData() {
+            try {
+                console.log('Fetching data from /api/stats...');
+                const response = await fetch('/api/stats');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Data received:', data);
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Hide error message if visible
+                document.getElementById('errorMessage').style.display = 'none';
+
+                // Update statistics grid
+                updateStatsGrid(data);
+
+                // Render charts
+                renderReadmissionChart(data);
+                renderMetricsChart(data);
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showError(error.message);
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = `Error: ${message}. Please ensure MongoDB is running and contains data.`;
+            errorDiv.style.display = 'block';
+            
+            document.getElementById('statsGrid').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">-</div>
+                    <div class="stat-label">No Data Available</div>
+                </div>
+            `;
+        }
+
+        function updateStatsGrid(data) {
+            const statsGrid = document.getElementById('statsGrid');
+            const totalPatients = data.total_patients || 0;
+            const avgStay = data.averages?.avg_stay || 0;
+            const avgMeds = data.averages?.avg_meds || 0;
+            const avgLabs = data.averages?.avg_labs || 0;
+            
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">${totalPatients.toLocaleString()}</div>
+                    <div class="stat-label">Total Patients Analyzed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${avgStay.toFixed(1)}</div>
+                    <div class="stat-label">Average Hospital Stay (Days)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${avgMeds.toFixed(1)}</div>
+                    <div class="stat-label">Average Medications</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${avgLabs.toFixed(1)}</div>
+                    <div class="stat-label">Average Lab Procedures</div>
+                </div>
+            `;
+        }
+
+        function renderReadmissionChart(data) {
+            const ctx = document.getElementById('readmissionChart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (readmissionChartInstance) {
+                readmissionChartInstance.destroy();
+            }
+            
+            if (!data.readmission_stats || data.readmission_stats.length === 0) {
+                ctx.font = '16px Arial';
+                ctx.fillStyle = '#7f8c8d';
+                ctx.textAlign = 'center';
+                ctx.fillText('No readmission data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+            
+            const labels = data.readmission_stats.map(item => {
+                if (item._id === '<30') return 'Readmitted < 30 days';
+                if (item._id === '>30') return 'Readmitted > 30 days';
+                if (item._id === 'NO') return 'Not Readmitted';
+                return item._id || 'Unknown';
+            });
+            const counts = data.readmission_stats.map(item => item.count);
+
+            readmissionChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: [
+                            '#667eea',
+                            '#764ba2',
+                            '#f093fb',
+                            '#f5576c'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 15,
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return `${label}: ${value.toLocaleString()} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderMetricsChart(data) {
+            const ctx = document.getElementById('metricsChart').getContext('2d');
+            
+            // Destroy existing chart if it exists
+            if (metricsChartInstance) {
+                metricsChartInstance.destroy();
+            }
+            
+            const avgStay = data.averages?.avg_stay || 0;
+            const avgMeds = data.averages?.avg_meds || 0;
+            const avgLabs = data.averages?.avg_labs || 0;
+            
+            metricsChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Hospital Stay (Days)', 'Medications', 'Lab Procedures'],
+                    datasets: [{
+                        label: 'Average Count',
+                        data: [avgStay, avgMeds, avgLabs],
+                        backgroundColor: [
+                            'rgba(102, 126, 234, 0.8)',
+                            'rgba(118, 75, 162, 0.8)',
+                            'rgba(240, 147, 251, 0.8)'
+                        ],
+                        borderColor: [
+                            'rgba(102, 126, 234, 1)',
+                            'rgba(118, 75, 162, 1)',
+                            'rgba(240, 147, 251, 1)'
+                        ],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `Average: ${context.parsed.y.toFixed(1)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Reload data every 30 seconds
+        setInterval(loadDashboardData, 30000);
+    </script>
+</body>
+</html>
